@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Financial Statement Analysis Assistant</title>
+<style>
+:root{--bg:#f6f5f1;--ink:#17202a;--mut:#5d6670;--line:#d9d6cc;--card:#fff;--acc:#0b5d4b;--warn:#b4531a}
+@media(prefers-color-scheme:dark){:root{--bg:#12171c;--ink:#e8e6e0;--mut:#9aa3ab;--line:#2c343b;--card:#1a2127;--acc:#4cc2a1;--warn:#e8985f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 60px}
+h1{font:600 28px/1.2 Georgia,serif;margin:0 0 6px}
+h2{font:600 19px Georgia,serif;margin:30px 0 10px}
+p.lead{color:var(--mut);margin:0 0 20px;max-width:64ch}
+.bar{display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px}
+label{font-size:13px;color:var(--mut);display:block}
+input,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line)}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle}
+th:first-child,td:first-child{text-align:left}
+th{font-size:13px;font-weight:600;color:var(--mut)}
+td input{width:100%;min-width:90px;text-align:right}
+tr.grp td{background:transparent;text-align:left;font-weight:600;color:var(--acc);border-bottom:2px solid var(--line)}
+.wrap{overflow-x:auto}
+button{font:inherit;font-weight:600;border-radius:6px;border:1px solid var(--acc);padding:9px 16px;cursor:pointer}
+button.pri{background:var(--acc);color:var(--bg)}
+button.sec{background:transparent;color:var(--acc)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.act{display:flex;gap:10px;margin:16px 0;flex-wrap:wrap}
+.err{color:var(--warn);font-weight:600;margin:8px 0}
+.flag{color:var(--warn);font-weight:600}
+.note{color:var(--mut);font-size:13px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:14px 16px;white-space:pre-wrap}
+code{background:var(--card);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:24px 0 12px}
+.tabs button{background:transparent;color:var(--acc)}
+.tabs button.on{background:var(--acc);color:var(--bg)}
+.hide{display:none}
+th.co{text-align:center;border-left:1px solid var(--line)}
+</style>
+</head>
+<body>
+<main>
+<h1>Financial Statement Analysis Assistant</h1>
+<p class="lead">Enter figures for the previous and current period (one or two companies). Leave a box empty if you do not have the figure. Every number is calculated in code using the formulas in SKILL.md; Claude only writes the commentary.</p>
+<div class="bar">
+  <div><label for="unit">Currency and unit</label>
+    <select id="unit"><option>Rs</option><option>Rs thousands</option><option>Rs lakhs</option><option>Rs crores</option><option>Rs millions</option><option>USD</option></select></div>
+  <div><label for="thr">Flag changes above (%)</label><input id="thr" type="number" value="10" min="0" max="1000" style="width:90px"></div>
+  <div><label for="yp">Previous year</label><input id="yp" value="FY 2024-25" style="width:120px"></div>
+  <div><label for="yc">Current year</label><input id="yc" value="FY 2025-26" style="width:120px"></div>
+  <div><label for="nameA">Company A name</label><input id="nameA" value="Sunrise Textiles Ltd"></div>
+  <div class="two hide"><label for="nameB">Company B name</label><input id="nameB" value="Greenfield Foods Ltd"></div>
+  <div><label><input type="checkbox" id="two"> Compare a second company</label></div>
+</div>
+<div class="wrap"><table id="inputs"><thead></thead><tbody></tbody></table></div>
+<div class="act">
+  <button class="pri" id="go">Analyse</button>
+  <button class="sec" id="sample">Load worked example</button>
+  <button class="sec" id="clear">Clear</button>
+</div>
+<div id="msg" class="err" role="alert"></div>
+<div id="res" class="hide">
+  <h2>Summary, insights and areas to review</h2><div class="box" id="ai"></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="out"></div>
+  <p class="note">"–" means a needed figure was not entered, or a denominator was zero. Net profit = operating profit - interest - tax (other income is not included). Not investment, tax or legal advice.</p>
+</div>
+</main>
+<script src="analysis.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const TABS = [["income", "📊 Income Statement"], ["balance", "📋 Balance Sheet"], ["cash", "💰 Cash Flow"], ["ratios", "📈 Financial Ratios"], ["period", "🔄 Period Comparison"]];
+const CO = ["A", "B"];
+if (typeof FSA === "undefined") { $("#msg").textContent = "analysis.js was not found. Keep index.html and analysis.js in the same folder (and upload both to GitHub)."; throw new Error("analysis.js missing"); }
+const PY = () => $("#yp").value || "Previous year", CY = () => $("#yc").value || "Current year";
+const GD = { "Income Statement": "📊 Income Statement: gross, operating and net profit, the three margins, tax rate, interest cover", "Balance Sheet": "📋 Balance Sheet: total assets and liabilities, balance check, working capital, current ratio, debt-to-assets, equity ratio", "Cash Flow": "💰 Cash Flow: net change in cash, closing cash, free cash flow, cash conversion" };
+const two = () => $("#two").checked;
+const cos = () => (two() ? CO : ["A"]);
+const name = (c) => $("#name" + c).value || "Company " + c;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function buildInputs() {
+  const cs = cos();
+  $("#inputs thead").innerHTML = "<tr><th rowspan=2>Item</th>" + cs.map((c) => `<th class="co" colspan=2>${esc(name(c))}</th>`).join("") + "</tr><tr>" + cs.map(() => `<th>${esc(PY())}</th><th>${esc(CY())}</th>`).join("") + "</tr>";
+  let g = "", html = "";
+  FSA.FIELDS.forEach((f) => {
+    if (f.g !== g) { g = f.g; html += `<tr class="grp"><td colspan="${1 + cs.length * 2}">${GD[g]}</td></tr>`; }
+    html += `<tr><td>${f.label}</td>` + cs.map((c) => ["p", "c"].map((p) => `<td><input inputmode="decimal" id="${c}_${p}_${f.k}" aria-label="${f.label}, ${name(c)}, ${p == "p" ? PY() : CY()}"></td>`).join("")).join("") + "</tr>";
+  });
+  const keep = {}; document.querySelectorAll("#inputs input").forEach((i) => (keep[i.id] = i.value));
+  $("#inputs tbody").innerHTML = html;
+  document.querySelectorAll("#inputs input").forEach((i) => { if (keep[i.id]) i.value = keep[i.id]; });
+  document.querySelectorAll(".two").forEach((e) => e.classList.toggle("hide", !two()));
+}
+$("#two").onchange = buildInputs;
+["nameA", "nameB", "yp", "yc"].forEach((id) => ($("#" + id).oninput = buildInputs));
+buildInputs();
+
+const read = () => ({
+  unit: $("#unit").value, threshold: $("#thr").value,
+  companies: cos().map((c) => {
+    const o = { name: name(c), prev: {}, cur: {} };
+    FSA.FIELDS.forEach((f) => { o.prev[f.k] = $(`#${c}_p_${f.k}`).value; o.cur[f.k] = $(`#${c}_c_${f.k}`).value; });
+    return o;
+  }),
+});
+
+const num = (v) => (v == null ? "–" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }));
+const FMT = { n: num, p: (v) => (v == null ? "–" : v + "%"), x: (v) => (v == null ? "–" : v.toFixed(2)), c: (v) => (v == null ? "–" : v === 0 ? "Balanced ✓" : "Off by " + num(v)) };
+const pc = (v) => (v == null ? "–" : (v > 0 ? "+" : "") + v + "%");
+const tbl = (head, rows) => `<div class="wrap"><table><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>`;
+const tr = (cells) => `<tr>${cells.map((c) => `<td>${c}</td>`).join("")}</tr>`;
+let R, UNIT;
+
+function show(tab) {
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === tab));
+  const cs = R.companies;
+  if (tab === "period") {
+    $("#out").innerHTML = cs.map((c) => `<h2>${esc(c.name)}: ${esc(CY())} vs ${esc(PY())} (${esc(UNIT)})</h2>` +
+      tbl(`<tr><th>Item</th><th>${esc(PY())}</th><th>${esc(CY())}</th><th>Change</th><th>Change %</th></tr>`,
+        c.compare.map((r) => tr([r.label, num(r.prev), num(r.cur), num(r.diff),
+          r.pct === null ? `<span class="note">${r.note ? esc(r.note) : "–"}</span>` : r.significant ? `<span class="flag">${pc(r.pct)} ▲ review</span>` : pc(r.pct)]))) +
+      `<p class="note">Change in net margin: ${c.netMarginChangePts === null ? "–" : (c.netMarginChangePts > 0 ? "+" : "") + c.netMarginChangePts + " percentage points"}. Items flagged change by more than ${R.threshold}%.</p>`).join("");
+    return;
+  }
+  const defs = FSA.DEFS.filter((d) => d.tab === tab);
+  const head = "<tr><th rowspan=2>Measure</th><th rowspan=2>Formula</th>" + cs.map((c) => `<th class="co" colspan=2>${esc(c.name)}</th>`).join("") + "</tr><tr>" + cs.map(() => `<th>${esc(PY())}</th><th>${esc(CY())}</th>`).join("") + "</tr>";
+  $("#out").innerHTML = tbl(head, defs.map((d) => tr([d.label, `<span class="note">${d.f}</span>`, ...cs.flatMap((c) => [FMT[d.t](c.prev[d.k]), FMT[d.t](c.cur[d.k])])])));
+}
+
+$("#go").onclick = async () => {
+  const inp = read();
+  $("#msg").textContent = "";
+  const e = FSA.validate(inp);
+  if (e) { $("#msg").textContent = e; return; }
+  R = FSA.analyse(inp, inp.threshold); UNIT = inp.unit;
+  $("#res").classList.remove("hide");
+  $("#tabs").innerHTML = TABS.map(([t, l]) => `<button class="sec" data-t="${t}">${l}</button>`).join("");
+  document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => show(b.dataset.t)));
+  show("income");
+  $("#ai").textContent = "Writing commentary with Claude…";
+  try {
+    const r = await fetch("/api/commentary", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(inp) });
+    const d = await r.json();
+    $("#ai").textContent = d.commentary || "Commentary unavailable (" + (d.commentaryError || d.error || "unknown error") + "). The tables are still correct.";
+  } catch (x) { $("#ai").textContent = "Commentary unavailable (could not reach the server). The tables are still correct."; }
+};
+
+// order: revenue, cogs, opex, interest, tax, CA, inventory, TA, CL, TL, debt, equity, cfo, cfi, cff, openCash, capex
+const S = {
+  A: { revenue: [1000000, 1200000], cogs: [600000, 720000], opex: [200000, 240000], interest: [20000, 20000], tax: [30000, 40000], currentAssets: [500000, 600000], inventory: [120000, 150000], totalAssets: [900000, 1000000], currentLiabilities: [280000, 300000], totalLiabilities: [450000, 500000], debt: [200000, 200000], equity: [450000, 500000], cfo: [150000, 200000], cfi: [-90000, -120000], cff: [-20000, -30000], openCash: [60000, 100000], capex: [80000, 110000] },
+  B: { revenue: [700000, 800000], cogs: [450000, 500000], opex: [150000, 170000], interest: [30000, 30000], tax: [17500, 25000], currentAssets: [350000, 400000], inventory: [90000, 100000], totalAssets: [850000, 900000], currentLiabilities: [240000, 250000], totalLiabilities: [430000, 450000], debt: [300000, 300000], equity: [420000, 450000], cfo: [70000, 90000], cfi: [-50000, -60000], cff: [-10000, -20000], openCash: [40000, 50000], capex: [45000, 55000] },
+};
+$("#sample").onclick = () => {
+  $("#two").checked = true; $("#nameA").value = "Sunrise Textiles Ltd"; $("#nameB").value = "Greenfield Foods Ltd"; buildInputs(); $("#clear").click(); $("#two").checked = true; buildInputs();
+  CO.forEach((c) => { for (const k in S[c]) { $(`#${c}_p_${k}`).value = S[c][k][0]; $(`#${c}_c_${k}`).value = S[c][k][1]; } });
+};
+$("#clear").onclick = () => { document.querySelectorAll("#inputs input").forEach((i) => (i.value = "")); $("#res").classList.add("hide"); $("#msg").textContent = ""; };
+</script>
+</body>
+</html>
